@@ -1,0 +1,5 @@
+name = Liga de Falleros Móvil
+description = Theme para aplicar estilos en móvil.
+core = 7.x
+php = DRUPAL_MINIMUM_PHP
+base_theme = bootstrap

@@ -1,0 +1,4 @@
+name = Configuración General
+description = Módulo para añadir código relacionado con el acceso y la gestión del sitio web.
+package = Administration
+core = 7.x
