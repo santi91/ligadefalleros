@@ -88,6 +88,7 @@
   <?php endif; ?>
   <div class="content"<?php print $content_attributes; ?>>
     <?php if (!empty($content['field_secciones'])): ?>
+    <?php print render($content['field_secciones'][4]); ?>
       <div class="col-xs-5 proyector-div-1">
         <?php print render($content['field_secciones'][0]); ?>
         <?php print render($content['field_secciones'][1]); ?>

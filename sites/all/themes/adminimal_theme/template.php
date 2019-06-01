@@ -611,6 +611,21 @@ function adminimal_preprocess_entity(&$variables) {
       }
     }
   }
+  if ($variables['entity_type'] == 'paragraphs_item' && $variables['elements']['#bundle'] == 'maximos_goleadores') {
+    $jugador_goles = [];
+    // Cargar los jugadores con db_query porque no funciona node_load_multiple.
+    $query = db_query('SELECT nid FROM {node} WHERE type = :type', [':type' => 'jugador']);
+    $result = $query->fetchAll();
+    foreach ($result as $jugador) {
+      $jugador = node_load($jugador->nid);
+      if ($jugador->status == 1 && !empty($jugador->field_goles_anotados_liga[LANGUAGE_NONE][0]['value'])) {
+        $jugador_goles[$jugador->title] = $jugador->field_goles_anotados_liga[LANGUAGE_NONE][0]['value'];
+      }
+    }
+    arsort($jugador_goles);
+    $jugador_goles = array_slice($jugador_goles, 0, 9);
+    $variables['jugador_goles'] = $jugador_goles;
+  }
 }
 
 /**
