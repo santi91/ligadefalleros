@@ -5,23 +5,34 @@
 */
 ?>
 
-<div id="branding" class="clearfix">
+<?php if (isset($user->roles[4])): ?>
+  <div id="branding" class="clearfix custom-header">
 
-	<?php print $breadcrumb; ?>
+  <!--	--><?php //print $breadcrumb; ?>
 
-	<?php print render($title_prefix); ?>
+    <?php print render($title_prefix); ?>
 
-	<?php if ($title): ?>
-		<h1 class="page-title"><?php print $title; ?></h1>
-	<?php endif; ?>
+    <?php if ($title): ?>
+      <h1 class="page-title"><?php print $title; ?></h1>
+    <?php endif; ?>
 
-	<?php print render($title_suffix); ?>
+    <?php print render($title_suffix); ?>
 
-</div>
+    <?php if (isset($logout_link)): ?>
+      <?php print $logout_link; ?>
+    <?php endif; ?>
+  </div>
+<?php endif; ?>
 
-<div id="navigation">
+<div id="navigation" class="custom-header">
 
-  <?php if ($primary_local_tasks): ?>
+  <?php // Cargar aquí menú con view de jugadores y gestión. ?>
+  <?php if (isset($gestion_menu)): ?>
+    <div id="menu-gestion">
+      <?php print theme('links__menu_gestion', array('links' => $gestion_menu)); ?>
+    </div>
+  <?php endif; ?>
+  <?php if ($primary_local_tasks && current_path() != 'user/login'): ?>
     <?php print render($primary_local_tasks); ?>
   <?php endif; ?>
 
@@ -63,7 +74,25 @@
     <?php endif; ?>
 
     <div id="main-content">
-	    <?php print render($page['content']); ?>
+      <?php if (isset($add_link)): ?>
+        <div id="add-section">
+          <?php print $add_link; ?>
+        </div>
+      <?php endif; ?>
+      <?php if (isset($show_resultados)): ?>
+        <div id="resultados-partido-edit" class="partidos">
+          <?php if (!empty($equipo_1) && !empty($equipo_2)): ?>
+            <?php $resultado_class = 'result-shown'; ?>
+          <?php else: ?>
+            <?php $resultado_class = 'result-not-shown'; ?>
+          <?php endif; ?>
+          <?php print '<h2 class="' . $resultado_class . '">'; ?>
+          <?php print '<span id="nombre-equipo-1">' . $equipo_1 . '</span> <span id="goles-equipo-1">' . $goles_equipo_1 . '</span>  -  '; ?>
+          <?php print '<span id="goles-equipo-2">' . $goles_equipo_2 . '</span> <span id="nombre-equipo-2">' . $equipo_2 . '</span>'; ?>
+          <?php print '</h2>'; ?>
+        </div>
+      <?php endif; ?>
+      <?php print render($page['content']); ?>
 	  </div>
 
     <?php if (isset($page['sidebar_right'])): ?>

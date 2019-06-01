@@ -4,9 +4,245 @@
  * Implements template_preprocess_html().
  */
 function general_config_preprocess_html(&$variables) {
-  // Checking device to do respective redirects.
-  $detect = mobile_detect_get_object();
-  if ($detect->isMobile()) {
-//    drupal_goto();
+  // Si es la homepage y está deslogeado siempre irá a la pagina de user login.
+  if ($variables['is_front'] && !$variables['logged_in']) {
+    drupal_goto('/user/login');
+  } // Setear el JS a la view de gestión de partidos.
+  if (isset($variables['page']['#views_contextual_links_info']) && $variables['page']['#views_contextual_links_info']['views_ui']['view_name'] == 'gestion_de_partidos') {
+    drupal_add_js(drupal_get_path('module', 'general_config') . '/js/gestion.js');
+  }
+  if ($variables['is_front'] && $variables['logged_in']) {
+    if (isset($variables['user']->roles[4])) {
+      drupal_goto('/gestion-partidos');
+    }
+    if (isset($variables['user']->roles[5])) {
+      drupal_goto('/proyector-fase-grupos');
+    }
+  }
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function general_config_form_alter(&$form, &$form_state, $form_id) {
+  global $user;
+  // Redireccionar el formulario de user login a la gestión de partidos en desktop.
+  if ($form_id == 'user_login') {
+    $form['#submit'][] = '_general_config_redirect_gestion';
+  }
+  // Si ya está logged in como editor.
+  if (isset($user->roles[4])) {
+    // Esconder fields en edición para simplificar y añadir CSS/JS.
+    $form_ids = ['partido_node_form', 'equipo_node_form', 'jugador_node_form'];
+    $params = drupal_get_query_parameters();
+    if (in_array($form_id, $form_ids)) {
+      if ($form_id == 'jugador_node_form') {
+        if (!isset($params['destination']) || strpos($params['destination'], 'gestion-jugadores') === FALSE) {
+          drupal_goto('gestion-jugadores');
+        }
+        // Esconder los fields de goles.
+//        $form['field_goles_anotados_liga']['#access'] = FALSE;
+//        $form['field_goles_encajados_liga']['#access'] = FALSE;
+//        $form['field_goles_anotados_copa']['#access'] = FALSE;
+//        $form['field_goles_encajados_copa']['#access'] = FALSE;
+      }
+      elseif ($form_id == 'equipo_node_form') {
+        if (!isset($params['destination']) || strpos($params['destination'], 'gestion-equipos') === FALSE) {
+          drupal_goto('gestion-equipos');
+        }
+        // Esconder los fields de goles.
+//        $form['field_victorias']['#access'] = FALSE;
+//        $form['field_derrotas']['#access'] = FALSE;
+      }
+      elseif ($form_id == 'partido_node_form') {
+        if (!isset($params['destination']) || strpos($params['destination'], 'gestion-partidos') === FALSE) {
+          drupal_goto('gestion-partidos');
+        }
+        // Centrar los fields del formulario y poner los fields de goles en el mismo div.
+        $equipo1 = node_load($form_state['node']->field_equipo_1[LANGUAGE_NONE][0]['target_id']);
+        $equipo2 = node_load($form_state['node']->field_equipo_2[LANGUAGE_NONE][0]['target_id']);
+        $form['#attributes']['class'][] = 'form-partido-center';
+        $form['field_goles_jugador_1_equipo_1']['#prefix'] = '<div class="container"><div class="col-xs-6 div-equipo-1"><h2 class="label-equipo-1">' . $equipo1->title . '</h2>';
+        $form['field_goles_jugador_2_equipo_1']['#suffix'] = '</div>';
+        $form['field_goles_jugador_1_equipo_2']['#prefix'] = '<div class="div-equipo-2"><h2 class="label-equipo-2">' . $equipo2->title . '</h2>';
+        $form['field_goles_jugador_2_equipo_2']['#suffix'] = '</div></div>';
+        // Nombres de los jugadores.
+        $jugador11 = node_load($equipo1->field_jugador_1[LANGUAGE_NONE][0]['target_id']);
+        $jugador21 = node_load($equipo1->field_jugador_2[LANGUAGE_NONE][0]['target_id']);
+        $jugador12 = node_load($equipo2->field_jugador_1[LANGUAGE_NONE][0]['target_id']);
+        $jugador22 = node_load($equipo2->field_jugador_2[LANGUAGE_NONE][0]['target_id']);
+        $form['field_goles_jugador_1_equipo_1'][LANGUAGE_NONE][0]['value']['#title'] = 'Goles ' . $jugador11->title;
+        $form['field_goles_jugador_2_equipo_1'][LANGUAGE_NONE][0]['value']['#title'] = 'Goles ' . $jugador21->title;
+        $form['field_goles_jugador_1_equipo_2'][LANGUAGE_NONE][0]['value']['#title'] = 'Goles ' . $jugador12->title;
+        $form['field_goles_jugador_2_equipo_2'][LANGUAGE_NONE][0]['value']['#title'] = 'Goles ' . $jugador22->title;
+        // Esconder el boton de eliminar.
+        unset($form['actions']['delete']);
+        // Esconder los fields de goles.
+        $form['title']['#access'] = FALSE;
+        $form['field_equipo_1']['#access'] = FALSE;
+        $form['field_equipo_2']['#access'] = FALSE;
+        $form['field_competicion']['#access'] = FALSE;
+        $form['field_fase_liga']['#access'] = FALSE;
+        $form['field_jornada_grupo_1']['#access'] = FALSE;
+        $form['field_jornada_grupo_2']['#access'] = FALSE;
+        $form['field_jornada_fase_final']['#access'] = FALSE;
+        $form['field_jornada_copa']['#access'] = FALSE;
+        // Añadir validate para comprobar que el numero de goles total no supera los 7 o 5 segun la competicion.
+        $form['#validate'][] = '_comprobar_goles';
+      }
+    }
+  }
+}
+
+/**
+ * Comprueba que el número total de goles no supere los 7(liga) o 5(copa).
+ */
+function _comprobar_goles(&$form, &$form_state) {
+  $goles_equipo_1 = 0;
+  $goles_equipo_2 = 0;
+  if (isset($form_state['values']['field_goles_jugador_1_equipo_1'][LANGUAGE_NONE])) {
+    $goles_equipo_1 += $form_state['values']['field_goles_jugador_1_equipo_1'][LANGUAGE_NONE][0]['value'];
+  }
+  if (isset($form_state['values']['field_goles_jugador_2_equipo_1'][LANGUAGE_NONE])) {
+    $goles_equipo_1 += $form_state['values']['field_goles_jugador_2_equipo_1'][LANGUAGE_NONE][0]['value'];
+  }
+  if (isset($form_state['values']['field_goles_jugador_1_equipo_2'][LANGUAGE_NONE])) {
+    $goles_equipo_2 += $form_state['values']['field_goles_jugador_1_equipo_2'][LANGUAGE_NONE][0]['value'];
+  }
+  if (isset($form_state['values']['field_goles_jugador_2_equipo_2'][LANGUAGE_NONE])) {
+    $goles_equipo_2 += $form_state['values']['field_goles_jugador_2_equipo_2'][LANGUAGE_NONE][0]['value'];
+  }
+  $condition_competicion = $form['field_competicion'][LANGUAGE_NONE]['#value'] == 3;
+  if ($condition_competicion) {
+    if ($goles_equipo_1 + $goles_equipo_2 != 7) {
+      form_set_error('', 'En copa, el número total de goles debe sumar 7');
+    }
+  }
+  else {
+    if ($goles_equipo_1 + $goles_equipo_2 != 5) {
+      form_set_error('', 'En copa, el número total de goles debe sumar 5');
+    }
+  }
+}
+
+/*
+ * Implements hook_preprocess_page().
+ */
+function general_config_preprocess_page(&$variables) {
+  // Create team and goal variables for page.tpl.php.
+  if (isset($variables['user']->roles[4])) {
+    if(isset($variables['page'], $variables['page']['content'], $variables['page']['content']['system_main'], $variables['page']['content']['system_main']['#node_edit_form'])) {
+      if (isset($variables['node']) && $variables['node']->type == 'partido' && $variables['page']['content']['system_main']['#node_edit_form']) {
+        $variables['show_resultados'] = TRUE;
+        $variables['equipo_1'] = '';
+        $variables['equipo_2'] = '';
+        if (!empty($variables['node']->field_equipo_1)) {
+          $equipo = node_load($variables['node']->field_equipo_1[LANGUAGE_NONE][0]['target_id']);
+          $variables['equipo_1'] = $equipo->title;
+        }
+        if (!empty($variables['node']->field_equipo_2)) {
+          $equipo = node_load($variables['node']->field_equipo_2[LANGUAGE_NONE][0]['target_id']);
+          $variables['equipo_2'] = $equipo->title;
+        }
+        $goles_jugador_1_equipo_1 = isset($variables['node']->field_goles_jugador_1_equipo_1[LANGUAGE_NONE]) ? $variables['node']->field_goles_jugador_1_equipo_1[LANGUAGE_NONE][0]['value'] : 0;
+        $goles_jugador_2_equipo_1 = isset($variables['node']->field_goles_jugador_2_equipo_1[LANGUAGE_NONE]) ? $variables['node']->field_goles_jugador_2_equipo_1[LANGUAGE_NONE][0]['value'] : 0;
+        $goles_jugador_1_equipo_2 = isset($variables['node']->field_goles_jugador_1_equipo_2[LANGUAGE_NONE]) ? $variables['node']->field_goles_jugador_1_equipo_2[LANGUAGE_NONE][0]['value'] : 0;
+        $goles_jugador_2_equipo_2 = isset($variables['node']->field_goles_jugador_2_equipo_2[LANGUAGE_NONE]) ? $variables['node']->field_goles_jugador_2_equipo_2[LANGUAGE_NONE][0]['value'] : 0;
+        $variables['goles_equipo_1'] = $goles_jugador_1_equipo_1 + $goles_jugador_2_equipo_1;
+        $variables['goles_equipo_2'] = $goles_jugador_1_equipo_2 + $goles_jugador_2_equipo_2;
+        // Add JS to see results in real time.
+        $file_path = drupal_get_path('module', 'general_config') .'/js/edicion_partidos.js';
+        drupal_add_js($file_path, 'file');
+      }
+    }
+  }
+}
+
+/**
+ * Redirección tras login.
+ */
+function _general_config_redirect_gestion(&$form_state) {
+  if ($form_state['#validated']) {
+    drupal_goto('gestion-partidos');
+  }
+}
+
+/**
+ * Implements hook_node_update().
+ */
+function general_config_node_update($node) {
+  if ($node->type == 'partido') {
+    // Cargamos los equipos.
+    $equipo1 = node_load($node->field_equipo_1[LANGUAGE_NONE][0]['target_id']);
+    $equipo2 = node_load($node->field_equipo_2[LANGUAGE_NONE][0]['target_id']);
+    // Cargamos los jugadores.
+    $jugador1_equipo1 = node_load($equipo1->field_jugador_1[LANGUAGE_NONE][0]['target_id']);
+    $jugador2_equipo1 = node_load($equipo1->field_jugador_2[LANGUAGE_NONE][0]['target_id']);
+    $jugador1_equipo2 = node_load($equipo2->field_jugador_1[LANGUAGE_NONE][0]['target_id']);
+    $jugador2_equipo2 = node_load($equipo2->field_jugador_2[LANGUAGE_NONE][0]['target_id']);
+    // Calculamos los goles anotados por equipo.
+    $goles_jugador_1_equipo_1 = !empty($node->field_goles_jugador_1_equipo_1) ? $node->field_goles_jugador_1_equipo_1[LANGUAGE_NONE][0]['value'] : 0;
+    $goles_jugador_2_equipo_1 = !empty($node->field_goles_jugador_2_equipo_1) ? $node->field_goles_jugador_2_equipo_1[LANGUAGE_NONE][0]['value'] : 0;
+    $goles_jugador_1_equipo_2 = !empty($node->field_goles_jugador_1_equipo_2) ? $node->field_goles_jugador_1_equipo_2[LANGUAGE_NONE][0]['value'] : 0;
+    $goles_jugador_2_equipo_2 = !empty($node->field_goles_jugador_2_equipo_2) ? $node->field_goles_jugador_2_equipo_2[LANGUAGE_NONE][0]['value'] : 0;
+    $goles_equipo_1 = $goles_jugador_1_equipo_1 + $goles_jugador_2_equipo_1;
+    $goles_equipo_2 = $goles_jugador_1_equipo_2 + $goles_jugador_2_equipo_2;
+    // Insertamos los goles de cada jugador comprobando la competición.
+    // Liga.
+    if ($node->field_competicion[LANGUAGE_NONE][0]['tid'] == 3) {
+      $jugador1_equipo1->field_goles_anotados_liga[LANGUAGE_NONE][0]['value'] += $goles_jugador_1_equipo_1;
+      $jugador2_equipo1->field_goles_anotados_liga[LANGUAGE_NONE][0]['value'] += $goles_jugador_2_equipo_1;
+      $jugador1_equipo2->field_goles_anotados_liga[LANGUAGE_NONE][0]['value'] += $goles_jugador_1_equipo_2;
+      $jugador2_equipo2->field_goles_anotados_liga[LANGUAGE_NONE][0]['value'] += $goles_jugador_2_equipo_2;
+      // Solo para los porteros, anotamos los goles encajados.
+      if ($jugador1_equipo1->field_posicion[LANGUAGE_NONE][0]['tid'] == 1) {
+        $jugador1_equipo1->field_goles_encajados_liga[LANGUAGE_NONE][0]['value'] += $goles_equipo_2;
+      }
+      if ($jugador2_equipo1->field_posicion[LANGUAGE_NONE][0]['tid'] == 1) {
+        $jugador2_equipo1->field_goles_encajados_liga[LANGUAGE_NONE][0]['value'] += $goles_equipo_2;
+      }
+      if ($jugador1_equipo2->field_posicion[LANGUAGE_NONE][0]['tid'] == 1) {
+        $jugador1_equipo2->field_goles_encajados_liga[LANGUAGE_NONE][0]['value'] += $goles_equipo_1;
+      }
+      if ($jugador2_equipo2->field_posicion[LANGUAGE_NONE][0]['tid'] == 1) {
+        $jugador2_equipo2->field_goles_encajados_liga[LANGUAGE_NONE][0]['value'] += $goles_equipo_1;
+      }
+      // Anotamos la victoria y la derrota de los equipos.
+      if ($goles_equipo_1 > $goles_equipo_2) {
+        $equipo1->field_victorias[LANGUAGE_NONE][0]['value'] += 1;
+        $equipo2->field_derrotas[LANGUAGE_NONE][0]['value'] += 1;
+      }
+      else {
+        $equipo1->field_derrotas[LANGUAGE_NONE][0]['value'] += 1;
+        $equipo2->field_victorias[LANGUAGE_NONE][0]['value'] += 1;
+      }
+    }
+    // Copa.
+    elseif ($node->field_competicion[LANGUAGE_NONE][0]['tid'] == 4) {
+      $jugador1_equipo1->field_goles_anotados_copa[LANGUAGE_NONE][0]['value'] += $goles_jugador_1_equipo_1;
+      $jugador2_equipo1->field_goles_anotados_copa[LANGUAGE_NONE][0]['value'] += $goles_jugador_2_equipo_1;
+      $jugador1_equipo2->field_goles_anotados_copa[LANGUAGE_NONE][0]['value'] += $goles_jugador_1_equipo_2;
+      $jugador2_equipo2->field_goles_anotados_copa[LANGUAGE_NONE][0]['value'] += $goles_jugador_2_equipo_2;
+      // Solo para los porteros, anotamos los goles encajados.
+      if ($jugador1_equipo1->field_posicion[LANGUAGE_NONE][0]['tid'] == 1) {
+        $jugador1_equipo1->field_goles_encajados_copa[LANGUAGE_NONE][0]['value'] += $goles_equipo_2;
+      }
+      if ($jugador2_equipo1->field_posicion[LANGUAGE_NONE][0]['tid'] == 1) {
+        $jugador2_equipo1->field_goles_encajados_copa[LANGUAGE_NONE][0]['value'] += $goles_equipo_2;
+      }
+      if ($jugador1_equipo2->field_posicion[LANGUAGE_NONE][0]['tid'] == 1) {
+        $jugador1_equipo2->field_goles_encajados_copa[LANGUAGE_NONE][0]['value'] += $goles_equipo_1;
+      }
+      if ($jugador2_equipo2->field_posicion[LANGUAGE_NONE][0]['tid'] == 1) {
+        $jugador2_equipo2->field_goles_encajados_copa[LANGUAGE_NONE][0]['value'] += $goles_equipo_1;
+      }
+    }
+    // Guardamos los equipos y los jugadores.
+    node_save($equipo1);
+    node_save($equipo2);
+    node_save($jugador1_equipo1);
+    node_save($jugador2_equipo1);
+    node_save($jugador1_equipo2);
+    node_save($jugador2_equipo2);
   }
 }

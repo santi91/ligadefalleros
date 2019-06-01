@@ -202,11 +202,63 @@ function adminimal_preprocess_html(&$vars) {
 function adminimal_preprocess_page(&$vars) {
   $vars['primary_local_tasks'] = $vars['tabs'];
   unset($vars['primary_local_tasks']['#secondary']);
+  // Remove primary tasks if editor role.
+  if (isset($vars['primary_local_tasks']) && isset($vars['user']->roles[4])) {
+    unset($vars['primary_local_tasks']['#primary']);
+  }
   $vars['secondary_local_tasks'] = array(
     '#theme' => 'menu_local_tasks',
     '#secondary' => $vars['tabs']['#secondary'],
   );
   unset($vars['page']['hidden']);
+
+  // Código para la gestión.
+  $current_path = current_path();
+  // Cargar menú para los editores.
+  if (isset($vars['user']->roles[4])) {
+    if ($current_path == 'gestion-jugadores') {
+      $vars['add_link'] = '<a href="/node/add/jugador?destination=' . $current_path . '" class="add-link">Añadir Jugador</a>';
+    }
+    elseif ($current_path == 'gestion-equipos') {
+      $vars['add_link'] = '<a href="/node/add/equipo?destination=' . $current_path . '" class="add-link">Añadir Equipo</a>';
+    }
+    $vars['gestion_menu'] = menu_navigation_links('menu-gestion');
+    // Logout link.
+    $vars['logout_link'] = '<a href="/user/logout" class="logout-link">Desconectarse</a>';
+  }
+}
+
+/**
+ * Implements template_preprocess_views_view_table.
+ */
+function adminimal_preprocess_views_view_table(&$vars) {
+  if ($vars['view']->name == 'gestion_de_partidos') {
+    foreach ($vars['rows'] as $key => $row) {
+      if (isset($vars['result'][$key]->field_field_goles_jugador_1_equipo_1) && isset($vars['result'][$key]->field_field_goles_jugador_2_equipo_1[0]['raw']['value'])) {
+        $vars['rows'][$key]['nothing'] = $vars['result'][$key]->field_field_goles_jugador_1_equipo_1[0]['raw']['value'] + $vars['result'][$key]->field_field_goles_jugador_2_equipo_1[0]['raw']['value'];
+      }
+      if (isset($vars['result'][$key]->field_field_goles_jugador_1_equipo_2) && isset($vars['result'][$key]->field_field_goles_jugador_2_equipo_2[0]['raw']['value'])) {
+        $vars['rows'][$key]['nothing_1'] = $vars['result'][$key]->field_field_goles_jugador_1_equipo_2[0]['raw']['value'] + $vars['result'][$key]->field_field_goles_jugador_2_equipo_2[0]['raw']['value'];
+      }
+    }
+  }
+  if ($vars['view']->name == 'clasificacion') {
+    foreach ($vars['rows'] as $key => $row) {
+      $equipo = node_load($row['nid']);
+      $jugador1 = node_load($equipo->field_jugador_1[LANGUAGE_NONE][0]['target_id']);
+      $jugador2 = node_load($equipo->field_jugador_2[LANGUAGE_NONE][0]['target_id']);
+      $goles_anotados = $goles_encajados = 0;
+      if (!empty($jugador1->field_goles_anotados_liga) && !empty($jugador2->field_goles_anotados_liga)) {
+        $goles_anotados = $jugador1->field_goles_anotados_liga[LANGUAGE_NONE][0]['value'] + $jugador2->field_goles_anotados_liga[LANGUAGE_NONE][0]['value'];
+      }
+      if (!empty($jugador1->field_goles_encajados_liga) && !empty($jugador2->field_goles_encajados_liga)) {
+        $goles_encajados = $jugador1->field_goles_encajados_liga[LANGUAGE_NONE][0]['value'] + $jugador2->field_goles_encajados_liga[LANGUAGE_NONE][0]['value'];
+      }
+      $vars['rows'][$key]['nothing'] = $goles_anotados;
+      $vars['rows'][$key]['nothing_1'] = $goles_encajados;
+      $vars['rows'][$key]['nid'] = '';
+    }
+  }
 }
 
 /**
@@ -526,4 +578,92 @@ function adminimal_ckeditor_settings_alter(&$settings) {
     $settings['skin'] = 'adminimal-dark, '. $base_url .'/'. $adminimal_path . '/skins/dark/ckeditor/';
     array_push($settings['contentsCss'], $base_url .'/'. $adminimal_path . '/skins/dark/ckeditor/contents.css');
   }
+}
+
+/**
+ * Implements hook_preprocess_entity().
+ */
+function adminimal_preprocess_entity(&$variables) {
+  if ($variables['entity_type'] == 'paragraphs_item' && $variables['elements']['#bundle'] == 'jornadas') {
+    if (!empty($variables['paragraphs_item']->field_jornadas)) {
+      $jornadas_partidos = [];
+      switch ($variables['paragraphs_item']->field_jornadas[LANGUAGE_NONE][0]['target_id']) {
+        case 6:
+          $jornadas_partidos = _generar_emparejamientos_grupo(6);
+          break;
+        case 7:
+          $jornadas_partidos = _generar_emparejamientos_grupo(7);
+          break;
+          // COPA Y FASE FINAL.
+//        case 8:
+//          break;
+//        case 9:
+//          break;
+      }
+      $variables['jornadas_partidos'] = $jornadas_partidos;
+      if ($variables['paragraphs_item']->field_jornadas[LANGUAGE_NONE][0]['target_id'] == 6) {
+        $variables['ul_class'] = 'slideshow-container-grupo-1';
+        $variables['li_class'] = 'mySlides-grupo-1';
+      }
+      else {
+        $variables['ul_class'] = 'slideshow-container-grupo-2';
+        $variables['li_class'] = 'mySlides-grupo-2';
+      }
+    }
+  }
+}
+
+/**
+ * Función para generar un array con emparejamientos por jornada y.
+ */
+function _generar_emparejamientos_grupo($vid) {
+  $grupo = $vid == 6 ? '%Grupo 1%' : '%Grupo 2%';
+  // Cargamos todos los partidos del grupo.
+  $partidos = [];
+  $query = db_query("SELECT nid FROM {node} WHERE type = :type AND title LIKE :grupo", [':type' => 'partido', ':grupo' => $grupo]);
+  $result = $query->fetchAll();
+  if (!empty($result)) {
+    foreach ($result as $partido) {
+      $partido = node_load($partido->nid);
+      if ($partido->status == 1) {
+        $partidos[] = $partido;
+      }
+    }
+  }
+  // Obtenemos todas las jornadas generadas para el grupo.
+  $jornadas = taxonomy_get_tree($vid);
+  // Reordenamos el array por tid.
+  $jornadas_tids = [];
+  foreach ($jornadas as $jornada) {
+    $jornadas_tids[] = $jornada->tid;
+  }
+  sort($jornadas_tids, SORT_NUMERIC);
+  array_multisort($jornadas, $jornadas_tids);
+  $jornadas_partidos = [];
+  foreach ($partidos as $partido)  {
+    foreach ($jornadas as $jornada) {
+      if ($vid == 6) {
+        $condition1 = !empty($partido->field_jornada_grupo_1);
+        $condition2 = $jornada->tid == $partido->field_jornada_grupo_1[LANGUAGE_NONE][0]['tid'];
+      }
+      else {
+        $condition1 = !empty($partido->field_jornada_grupo_2);
+        $condition2 = $jornada->tid == $partido->field_jornada_grupo_2[LANGUAGE_NONE][0]['tid'];
+      }
+      if ($condition1 && $condition2) {
+        $equipo1 = node_load($partido->field_equipo_1[LANGUAGE_NONE][0]['target_id']);
+        $equipo2 = node_load($partido->field_equipo_2[LANGUAGE_NONE][0]['target_id']);
+        $goles_equipo1 = $goles_equipo2 = 0;
+        if (!empty($partido->field_goles_jugador_1_equipo_1) && !empty($partido->field_goles_jugador_2_equipo_1)) {
+          $goles_equipo1 = $partido->field_goles_jugador_1_equipo_1[LANGUAGE_NONE][0]['value'] + $partido->field_goles_jugador_2_equipo_1[LANGUAGE_NONE][0]['value'];
+        }
+        if (!empty($partido->field_goles_jugador_1_equipo_2) && !empty($partido->field_goles_jugador_2_equipo_2)) {
+          $goles_equipo2 = $partido->field_goles_jugador_1_equipo_2[LANGUAGE_NONE][0]['value'] + $partido->field_goles_jugador_2_equipo_2[LANGUAGE_NONE][0]['value'];
+        }
+        $jornadas_partidos[$jornada->name][] = '<span class="equipo-title1">' . $equipo1->title . '</span> ' . '<span class="equipo-goles">' . $goles_equipo1 . '</span>' . ' <span class="versus">vs</span> ' . '<span class="equipo-goles">' . $goles_equipo2 . '</span>' . '   <span class="equipo-title2">' . $equipo2->title . '</span>';
+      }
+    }
+  }
+
+  return $jornadas_partidos;
 }
